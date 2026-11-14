@@ -190,7 +190,9 @@ async function runSubstageBTests() {
     findFirst: async ({ where }: any) => {
       for (const draft of db.documentDrafts.values()) {
         if (draft.matterId === where.matterId) {
-          if (where.OR) {
+          if (where.title?.contains) {
+            if (draft.title.includes(where.title.contains)) return draft;
+          } else if (where.OR) {
             const matchesOr = where.OR.some((condition: any) => {
               if (condition.title?.contains && draft.title.includes(condition.title.contains)) return true;
               return false;

@@ -596,13 +596,30 @@ export class PersonalInjuryService {
 
     if (isReadyStatus) {
       // Check for existing draft to ensure idempotency and prevent duplicate tasks
-      // Scoped strictly to this specific demand package (matterId + demandPackage.id)
-      const existingDraft = await (prisma as any).documentDraft.findFirst({
-        where: {
-          matterId: matter.id,
-          title: { contains: demandPackage.id },
-        },
-      });
+      // 1. Direct database record check via checklistState or draftDocumentId
+      let existingDraft: any = null;
+      try {
+        const existingPkg = await (prisma as any).pIDemandPackage.findUnique({
+          where: { id: demandPackage.id },
+          select: { id: true, checklistState: true, draftDocumentId: true },
+        });
+        const linkedDraftId = existingPkg?.checklistState?.autoDraftId || existingPkg?.draftDocumentId;
+        if (linkedDraftId) {
+          existingDraft = await (prisma as any).documentDraft.findUnique({
+            where: { id: linkedDraftId },
+          });
+        }
+      } catch {}
+
+      // 2. Scoped database query fallback (matterId + demandPackage.id)
+      if (!existingDraft) {
+        existingDraft = await (prisma as any).documentDraft.findFirst({
+          where: {
+            matterId: matter.id,
+            title: { contains: demandPackage.id },
+          },
+        });
+      }
 
       if (!existingDraft) {
         DocumentEventBus.emitAsync(
