@@ -142,6 +142,50 @@ export class DraftDataResolver {
       };
     }
 
+    if (sEntity === 'demand' || sField.includes('demand') || sField.includes('policylimit')) {
+      return {
+        recordType: 'Settlement Demand Package',
+        navigationUrl: '/personal-injury/demand',
+        suggestedTitle: sField.includes('amount')
+          ? 'Follow-up: Missing Settlement Demand Amount'
+          : sField.includes('carrier')
+          ? 'Follow-up: Missing Recipient Insurance Carrier'
+          : 'Follow-up: Incomplete Settlement Demand Specification',
+        suggestedDescription: `Missing ${sourceEntity}.${sourceField} is required for settlement demand package generation. Please complete the demand package details.`,
+        priority: 'Critical',
+      };
+    }
+
+    if (sEntity === 'damages' || sEntity === 'injuries' || sField.includes('injury') || sField.includes('futuremedical')) {
+      return {
+        recordType: 'PI Damages & Injury Ledger',
+        navigationUrl: '/personal-injury/damages',
+        suggestedTitle: 'Follow-up: Incomplete Injury & Damages Documentation',
+        suggestedDescription: `Missing ${sourceEntity}.${sourceField} is needed to substantiate bodily injury damages in settlement demand.`,
+        priority: 'High',
+      };
+    }
+
+    if (sEntity === 'wageloss' || sField.includes('wage') || sField.includes('lostwages') || sField.includes('payrate')) {
+      return {
+        recordType: 'Wage Loss & Economic Damages',
+        navigationUrl: '/personal-injury/damages',
+        suggestedTitle: 'Follow-up: Missing Wage Loss & Lost Earnings Documentation',
+        suggestedDescription: `Missing ${sourceEntity}.${sourceField} is needed to substantiate lost earning capacity. Please update employer verification.`,
+        priority: 'Medium',
+      };
+    }
+
+    if (sEntity === 'medicalbilling' || sEntity === 'billing' || sField.includes('billed') || sField.includes('balanceowed')) {
+      return {
+        recordType: 'Medical Billing Summary',
+        navigationUrl: '/personal-injury/medical',
+        suggestedTitle: 'Follow-up: Incomplete Medical Billing Summary',
+        suggestedDescription: `Missing ${sourceEntity}.${sourceField} is required to calculate total special damages. Please update billing balances.`,
+        priority: 'High',
+      };
+    }
+
     if (sEntity === 'client') {
       return {
         recordType: 'Client Profile',
@@ -197,6 +241,32 @@ export class DraftDataResolver {
     const incidentRecord = matter.incidents?.[0] || {};
     const policyRecord = matter.insurancePolicies?.[0] || {};
     const providerRecord = matter.medicalProviders?.[0] || {};
+    const demandPackage = matter.demandPackages?.[0] || {};
+    const damagesRecord = matter.damagesRecords?.[0] || {};
+    const wageLossRecord = matter.wageLossRecords?.[0] || {};
+    const billingSummary = matter.medicalBillingSummaries?.[0] || {};
+
+    // Calculate aggregate totals from related collections
+    const totalMedicalBilled = (matter.medicalBillingSummaries || []).reduce(
+      (sum: number, b: any) => sum + Number(b.totalBilled || 0),
+      0
+    );
+    const totalMedicalBalance = (matter.medicalBillingSummaries || []).reduce(
+      (sum: number, b: any) => sum + Number(b.cachedBalanceOwed || 0),
+      0
+    );
+    const totalLostWages = (matter.wageLossRecords || []).reduce(
+      (sum: number, w: any) => sum + Number(w.totalLostWages || 0),
+      0
+    );
+    const totalFutureMedical = (matter.damagesRecords || []).reduce(
+      (sum: number, d: any) => sum + Number(d.futureMedicalEstimatedCost || 0),
+      0
+    );
+    const calculatedSpecials =
+      (totalMedicalBilled > 0 ? totalMedicalBilled : Number(billingSummary.totalBilled || 0)) +
+      (totalLostWages > 0 ? totalLostWages : Number(wageLossRecord.totalLostWages || 0)) +
+      (totalFutureMedical > 0 ? totalFutureMedical : Number(damagesRecord.futureMedicalEstimatedCost || 0));
 
     const now = new Date();
 
@@ -298,6 +368,50 @@ export class DraftDataResolver {
         daysOverdue: customOverrides?.days_overdue || null,
         missingRecordsSummary: customOverrides?.missing_records_summary || null,
       },
+      Demand: {
+        demandTitle: customOverrides?.demand_title || demandPackage.demandTitle || customOverrides?.['Demand.demandTitle'] || 'Personal Injury Settlement Demand',
+        demandedAmount: customOverrides?.demand_amount !== undefined ? customOverrides.demand_amount : (demandPackage.demandedAmount !== undefined ? demandPackage.demandedAmount : customOverrides?.['Demand.demandedAmount'] || null),
+        policyLimitAmount: customOverrides?.policy_limit !== undefined ? customOverrides.policy_limit : (demandPackage.policyLimitAmount !== undefined ? demandPackage.policyLimitAmount : policyRecord.policyLimit || customOverrides?.['Demand.policyLimitAmount'] || null),
+        isPolicyLimitDemand: customOverrides?.is_policy_limit_demand !== undefined ? customOverrides.is_policy_limit_demand : (demandPackage.isPolicyLimitDemand !== undefined ? demandPackage.isPolicyLimitDemand : false),
+        recipientCarrier: customOverrides?.recipient_carrier || demandPackage.recipientCarrier || policyRecord.insuranceCompany || customOverrides?.['Demand.recipientCarrier'] || null,
+        claimNumber: customOverrides?.claim_number || demandPackage.claimNumber || policyRecord.claimNumber || customOverrides?.['Demand.claimNumber'] || null,
+        deadlineDate: customOverrides?.deadline_date || demandPackage.deadlineDate || customOverrides?.['Demand.deadlineDate'] || null,
+        status: demandPackage.status || customOverrides?.demand_status || 'DRAFTING',
+        notes: customOverrides?.demand_notes || demandPackage.notes || null,
+      },
+      Damages: {
+        injuryCategory: customOverrides?.injury_category || damagesRecord.injuryCategory || customOverrides?.['Damages.injuryCategory'] || null,
+        anatomicalLocation: customOverrides?.anatomical_location || damagesRecord.anatomicalLocation || customOverrides?.['Damages.anatomicalLocation'] || null,
+        severityGrade: customOverrides?.severity_grade || damagesRecord.severityGrade || customOverrides?.['Damages.severityGrade'] || null,
+        icdCode: customOverrides?.icd_code || damagesRecord.icdCode || customOverrides?.['Damages.icdCode'] || null,
+        treatmentSummary: customOverrides?.treatment_summary || damagesRecord.treatmentSummary || customOverrides?.['Damages.treatmentSummary'] || null,
+        futureTreatmentProjected: customOverrides?.future_treatment_projected !== undefined ? customOverrides.future_treatment_projected : (damagesRecord.futureTreatmentProjected !== undefined ? damagesRecord.futureTreatmentProjected : false),
+        futureMedicalEstimatedCost: customOverrides?.future_medical_estimated_cost !== undefined ? customOverrides.future_medical_estimated_cost : (damagesRecord.futureMedicalEstimatedCost !== undefined ? damagesRecord.futureMedicalEstimatedCost : (totalFutureMedical > 0 ? totalFutureMedical : null)),
+        totalFutureMedical: totalFutureMedical > 0 ? totalFutureMedical : (damagesRecord.futureMedicalEstimatedCost || null),
+      },
+      WageLoss: {
+        employerName: customOverrides?.employer_name || wageLossRecord.employerName || customOverrides?.['WageLoss.employerName'] || null,
+        jobTitle: customOverrides?.job_title || wageLossRecord.jobTitle || customOverrides?.['WageLoss.jobTitle'] || null,
+        payRateType: customOverrides?.pay_rate_type || wageLossRecord.payRateType || null,
+        basePayRate: customOverrides?.base_pay_rate !== undefined ? customOverrides.base_pay_rate : (wageLossRecord.basePayRate !== undefined ? wageLossRecord.basePayRate : null),
+        hoursLost: customOverrides?.hours_lost !== undefined ? customOverrides.hours_lost : (wageLossRecord.hoursLost !== undefined ? wageLossRecord.hoursLost : null),
+        daysLost: customOverrides?.days_lost !== undefined ? customOverrides.days_lost : (wageLossRecord.daysLost !== undefined ? wageLossRecord.daysLost : null),
+        totalLostWages: customOverrides?.total_lost_wages !== undefined ? customOverrides.total_lost_wages : (totalLostWages > 0 ? totalLostWages : (wageLossRecord.totalLostWages !== undefined ? wageLossRecord.totalLostWages : null)),
+        isVerifiedByEmployer: customOverrides?.is_verified_by_employer !== undefined ? customOverrides.is_verified_by_employer : (wageLossRecord.isVerifiedByEmployer !== undefined ? wageLossRecord.isVerifiedByEmployer : false),
+      },
+      MedicalBilling: {
+        totalBilled: customOverrides?.total_medical_bills !== undefined ? customOverrides.total_medical_bills : (totalMedicalBilled > 0 ? totalMedicalBilled : (billingSummary.totalBilled !== undefined ? billingSummary.totalBilled : null)),
+        cachedBalanceOwed: customOverrides?.balance_owed !== undefined ? customOverrides.balance_owed : (totalMedicalBalance > 0 ? totalMedicalBalance : (billingSummary.cachedBalanceOwed !== undefined ? billingSummary.cachedBalanceOwed : null)),
+        treatmentStatus: customOverrides?.treatment_status || billingSummary.treatmentStatus || null,
+        accountNumber: billingSummary.accountNumber || null,
+      },
+      Specials: {
+        totalMedicalBilled: totalMedicalBilled > 0 ? totalMedicalBilled : (billingSummary.totalBilled || null),
+        totalLostWages: totalLostWages > 0 ? totalLostWages : (wageLossRecord.totalLostWages || null),
+        totalFutureMedical: totalFutureMedical > 0 ? totalFutureMedical : (damagesRecord.futureMedicalEstimatedCost || null),
+        totalSpecialDamages: customOverrides?.total_special_damages !== undefined ? customOverrides.total_special_damages : (calculatedSpecials > 0 ? calculatedSpecials : null),
+        totalGeneralDamages: customOverrides?.total_general_damages !== undefined ? customOverrides.total_general_damages : null,
+      },
       Firm: {
         name: 'Heugly & Bludworth, Attorneys at Law',
         address: '136 E South Temple, Suite 1400, Salt Lake City, UT 84111',
@@ -323,6 +437,11 @@ export class DraftDataResolver {
     resolvedData['insurance'] = { ...rawEntityLookup.Insurance };
     resolvedData['medicalProvider'] = { ...rawEntityLookup.MedicalProvider };
     resolvedData['medicalRecords'] = { ...rawEntityLookup.MedicalRecords };
+    resolvedData['demand'] = { ...rawEntityLookup.Demand };
+    resolvedData['damages'] = { ...rawEntityLookup.Damages };
+    resolvedData['wageLoss'] = { ...rawEntityLookup.WageLoss };
+    resolvedData['medicalBilling'] = { ...rawEntityLookup.MedicalBilling };
+    resolvedData['specials'] = { ...rawEntityLookup.Specials };
     resolvedData['firm'] = { ...rawEntityLookup.Firm };
     resolvedData['today'] = rawEntityLookup.CurrentDate.long;
     resolvedData['currentYear'] = rawEntityLookup.CurrentDate.year;
