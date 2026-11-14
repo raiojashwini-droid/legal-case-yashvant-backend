@@ -101,7 +101,7 @@ export class DraftService {
     // 1. Authorize Matter Access with Ethical Wall screening
     await MatterService.getMatterByIdOrNumber(input.matterId, currentUser);
 
-    const matter = await prisma.matter.findFirst({
+    const matter: any = await (prisma.matter.findFirst as any)({
       where: {
         OR: [{ id: input.matterId }, { matterNumber: input.matterId }],
       },
@@ -201,7 +201,7 @@ export class DraftService {
     // 1. Authorize Matter Access
     await MatterService.getMatterByIdOrNumber(input.matterId, currentUser);
 
-    const matter = await prisma.matter.findFirst({
+    const matter: any = await (prisma.matter.findFirst as any)({
       where: {
         OR: [{ id: input.matterId }, { matterNumber: input.matterId }],
       },

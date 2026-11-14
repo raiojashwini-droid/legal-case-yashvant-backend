@@ -627,21 +627,21 @@ export class AutoDraftService {
         return result;
       }
 
-      // Idempotency check:
+      // Idempotency check: strictly scoped to matterId AND demandPackageId if provided
       const existingDraft140 = await prisma.documentDraft.findFirst({
         where: {
           matterId: matter.id,
           templateId: template140.id,
           ...(payload.demandPackageId
             ? { title: { contains: payload.demandPackageId } }
-            : { title: { contains: 'Demand' } }),
+            : { title: { contains: 'Settlement Demand' } }),
         },
       });
 
       if (existingDraft140) {
         result.skipped.push({
           templateCode: template140.templateCode,
-          reason: `Settlement demand draft '${existingDraft140.draftCode}' already exists for this matter (Idempotent trigger).`,
+          reason: `Settlement demand draft '${existingDraft140.draftCode}' already exists for this demand package (Idempotent trigger).`,
         });
         return result;
       }
@@ -662,10 +662,10 @@ export class AutoDraftService {
         ...payload.customOverrides,
       };
 
-      const draftTitle = payload.demandTitle
+      const draftTitle = payload.demandPackageId
+        ? `${payload.demandTitle || 'Settlement Demand Letter'} - [Pkg: ${payload.demandPackageId}]`
+        : payload.demandTitle
         ? payload.demandTitle
-        : payload.demandPackageId
-        ? `Settlement Demand Letter - ${payload.demandPackageId}`
         : `Settlement Demand Letter - ${payload.recipientCarrier || 'Adverse Carrier'}`;
 
       const draft140 = await DraftService.generateDraft(
