@@ -10,6 +10,7 @@ import {
   assignStaffSchema,
   matterQuerySchema,
 } from './matter.validation.js';
+import { signAuthorizationSchema } from '../personal-injury/pi.validation.js';
 
 export const matterRouter = Router();
 
@@ -86,5 +87,33 @@ matterRouter.post(
   '/:matterId/demands',
   requirePermission('matters:edit'),
   PersonalInjuryController.createDemand
+);
+
+// Medical Authorization Signature Evidence Endpoint
+matterRouter.post(
+  '/:matterId/records-requests/:requestId/sign-authorization',
+  requirePermission('matters:edit'),
+  validateRequest({ body: signAuthorizationSchema }),
+  PersonalInjuryController.signAuthorization
+);
+
+// Records Request Status Update (Enforces Authorization Readiness Gate)
+matterRouter.patch(
+  '/:matterId/records-requests/:requestId/status',
+  requirePermission('matters:edit'),
+  PersonalInjuryController.updateRecordRequestStatus
+);
+
+// Matter PI Workflow Tasks & Reminders Inspector
+matterRouter.get(
+  '/:matterId/workflow/tasks',
+  requirePermission('matters:view'),
+  PersonalInjuryController.getMatterWorkflowTasks
+);
+
+matterRouter.get(
+  '/:matterId/pi-tasks',
+  requirePermission('matters:view'),
+  PersonalInjuryController.getMatterWorkflowTasks
 );
 

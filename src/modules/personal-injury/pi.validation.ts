@@ -73,3 +73,58 @@ export const demandPackageSchema = z.object({
   notes: z.string().optional().nullable(),
   emitDemandReady: z.boolean().optional().default(false),
 });
+
+export const signAuthorizationSchema = z.object({
+  authorizationDocumentId: z
+    .string({
+      required_error: 'authorizationDocumentId is required',
+      invalid_type_error: 'authorizationDocumentId must be a string',
+    })
+    .min(1, 'authorizationDocumentId cannot be empty'),
+  signatureDate: z
+    .string({
+      required_error: 'signatureDate is required',
+      invalid_type_error: 'signatureDate must be a string',
+    })
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'signatureDate must be in YYYY-MM-DD format')
+    .refine(
+      (dateStr) => {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return false;
+        const today = new Date();
+        today.setHours(23, 59, 59, 999);
+        return d <= today;
+      },
+      {
+        message: 'signatureDate cannot be in the future',
+      }
+    ),
+  notes: z.string().max(1000).optional(),
+});
+
+export type SignAuthorizationInput = z.infer<typeof signAuthorizationSchema>;
+
+export const updateRecordsRequestStatusSchema = z.object({
+  status: z.enum(['Drafted', 'Ready to Send', 'Sent', 'Received', 'Incomplete', 'Cancelled'], {
+    required_error: 'status is required',
+  }),
+  sentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'sentDate must be YYYY-MM-DD').optional(),
+  notes: z.string().max(1000).optional(),
+});
+
+export type UpdateRecordsRequestStatusInput = z.infer<typeof updateRecordsRequestStatusSchema>;
+
+export const processRemindersSchema = z.object({
+  asOfDate: z.string().optional(),
+  matterId: z.string().uuid().optional(),
+});
+
+export type ProcessRemindersInput = z.infer<typeof processRemindersSchema>;
+
+export const processOverdueSchema = z.object({
+  asOfDate: z.string().optional(),
+  matterId: z.string().uuid().optional(),
+});
+
+export type ProcessOverdueInput = z.infer<typeof processOverdueSchema>;
+
