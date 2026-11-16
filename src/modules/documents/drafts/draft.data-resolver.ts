@@ -304,7 +304,18 @@ export class DraftDataResolver {
       ResponsibleAttorney: {
         id: attorney.id,
         userCode: attorney.userCode,
-        name: attorney.name,
+        name: attorney.name || matter.responsibleAttorneyName || (matter.responsibleAttorney ? matter.responsibleAttorney.name : null),
+        email: attorney.email,
+        phone: attorney.phone,
+        title: attorney.title,
+        initials: attorney.initials,
+        department: attorney.department,
+        billingRate: attorney.billingRate,
+      },
+      Attorney: {
+        id: attorney.id,
+        userCode: attorney.userCode,
+        name: attorney.name || matter.responsibleAttorneyName || (matter.responsibleAttorney ? matter.responsibleAttorney.name : null),
         email: attorney.email,
         phone: attorney.phone,
         title: attorney.title,
@@ -314,7 +325,7 @@ export class DraftDataResolver {
       },
       User: {
         id: attorney.id,
-        name: attorney.name,
+        name: attorney.name || matter.responsibleAttorneyName || (matter.responsibleAttorney ? matter.responsibleAttorney.name : null),
         email: attorney.email,
         phone: attorney.phone,
         title: attorney.title,
@@ -355,9 +366,11 @@ export class DraftDataResolver {
         adjusterEmail: customOverrides?.adjuster_email || policyRecord.adjusterEmail || customOverrides?.['Insurance.adjusterEmail'] || null,
       },
       MedicalProvider: {
-        providerName: customOverrides?.provider_name || providerRecord.providerName || customOverrides?.['MedicalProvider.providerName'] || null,
+        name: customOverrides?.provider_name || customOverrides?.name || providerRecord.providerName || customOverrides?.['MedicalProvider.name'] || customOverrides?.['MedicalProvider.Name'] || null,
+        providerName: customOverrides?.provider_name || customOverrides?.name || providerRecord.providerName || customOverrides?.['MedicalProvider.providerName'] || null,
+        address: customOverrides?.facility_address || customOverrides?.provider_address || customOverrides?.address || providerRecord.facilityAddress || customOverrides?.['MedicalProvider.address'] || customOverrides?.['MedicalProvider.Address'] || null,
+        facilityAddress: customOverrides?.facility_address || customOverrides?.provider_address || customOverrides?.address || providerRecord.facilityAddress || customOverrides?.['MedicalProvider.facilityAddress'] || null,
         providerType: customOverrides?.provider_type || providerRecord.providerType || customOverrides?.['MedicalProvider.providerType'] || null,
-        facilityAddress: customOverrides?.facility_address || customOverrides?.provider_address || providerRecord.facilityAddress || null,
         phone: customOverrides?.provider_phone || customOverrides?.phone || providerRecord.phone || null,
         fax: customOverrides?.provider_fax || customOverrides?.fax || providerRecord.fax || null,
         treatmentDates: customOverrides?.treatment_dates || customOverrides?.dates_of_service || null,
@@ -459,8 +472,33 @@ export class DraftDataResolver {
 
     for (const mapping of mappings) {
       const cleanTag = mapping.placeholderTag.replace(/^\{\{|\}\}$/g, '').trim();
-      const entity = rawEntityLookup[mapping.sourceEntity] || {};
-      let val = entity[mapping.sourceField];
+      const sEntity = (mapping.sourceEntity || '').toLowerCase();
+      let entity = rawEntityLookup[mapping.sourceEntity];
+      if (!entity) {
+        if (sEntity === 'attorney' || sEntity === 'responsibleattorney') {
+          entity = rawEntityLookup.Attorney || rawEntityLookup.ResponsibleAttorney;
+        } else {
+          const matchKey = Object.keys(rawEntityLookup).find(k => k.toLowerCase() === sEntity);
+          entity = matchKey ? rawEntityLookup[matchKey] : {};
+        }
+      }
+      let val = entity ? entity[mapping.sourceField] : undefined;
+
+      // Special fallback for Attorney.Name or any attorney name token
+      if ((val === null || val === undefined || val === '') && 
+          (cleanTag.toLowerCase() === 'attorney.name' || (sEntity.includes('attorney') && mapping.sourceField === 'name'))) {
+        val = rawEntityLookup.Attorney?.name || rawEntityLookup.ResponsibleAttorney?.name || attorney?.name || matter?.responsibleAttorneyName || matter?.responsibleAttorney?.name;
+      }
+
+      // Special fallback for MedicalProvider name and address tokens
+      if ((val === null || val === undefined || val === '') &&
+          (cleanTag.toLowerCase() === 'medicalprovider.name' || (sEntity.includes('provider') && (mapping.sourceField === 'name' || mapping.sourceField === 'providerName')))) {
+        val = rawEntityLookup.MedicalProvider?.name || rawEntityLookup.MedicalProvider?.providerName || providerRecord?.providerName;
+      }
+      if ((val === null || val === undefined || val === '') &&
+          (cleanTag.toLowerCase() === 'medicalprovider.address' || (sEntity.includes('provider') && (mapping.sourceField === 'address' || mapping.sourceField === 'facilityAddress')))) {
+        val = rawEntityLookup.MedicalProvider?.address || rawEntityLookup.MedicalProvider?.facilityAddress || providerRecord?.facilityAddress;
+      }
 
       // Check for user-provided custom overrides
       if (customOverrides && customOverrides[cleanTag] !== undefined) {
