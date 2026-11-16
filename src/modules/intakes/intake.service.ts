@@ -160,10 +160,16 @@ export class IntakeService {
   ): Promise<IntakeResponse> {
     const existing = await this.getIntakeByIdOrNumber(id);
 
+    // If prospectiveClient or adverseParties changed, invalidate previous conflict clearance (Utah RPC 1.7 stale check)
+    const partiesChanged =
+      (input.prospectiveClient && input.prospectiveClient.trim() !== existing.prospectiveClient.trim()) ||
+      (input.adverseParties && input.adverseParties.trim() !== existing.adverseParties.trim());
+
     const updated = await prisma.intake.update({
       where: { id: existing.id },
       data: {
         ...input,
+        ...(partiesChanged ? { conflictStatus: 'Not Started', reviewedByUserId: null, reviewedAt: null } : {}),
       },
       include: { practiceArea: true, reviewedByUser: true },
     });
@@ -293,6 +299,13 @@ export class IntakeService {
       throw AppError.conflict('Intake has already been converted to a client.', 'ALREADY_CONVERTED');
     }
 
+    if (!['Cleared', 'Waiver Obtained'].includes(intake.conflictStatus)) {
+      throw AppError.badRequest(
+        `Cannot onboard client: Conflict status is '${intake.conflictStatus}'. Utah RPC 1.7 requires conflict check to be Cleared or Waiver Obtained before client creation.`,
+        'CONFLICT_NOT_CLEARED'
+      );
+    }
+
     // Provision new client record using ClientService
     const client = await ClientService.createClient(
       {
@@ -334,6 +347,13 @@ export class IntakeService {
   ): Promise<{ matter: any; intake: IntakeResponse }> {
     const intake = await this.getIntakeByIdOrNumber(id);
 
+    if (!['Cleared', 'Waiver Obtained'].includes(intake.conflictStatus)) {
+      throw AppError.badRequest(
+        `Cannot open matter: Conflict status is '${intake.conflictStatus}'. Utah RPC 1.7 requires conflict check to be Cleared or Waiver Obtained before matter creation.`,
+        'CONFLICT_NOT_CLEARED'
+      );
+    }
+
     let clientId = input.clientId || intake.convertedClientId;
     if (!clientId) {
       // Auto-create client first if needed
@@ -373,6 +393,53 @@ export class IntakeService {
       },
       include: { practiceArea: true, reviewedByUser: true },
     });
+
+    // If Personal Injury, automatically extract structured intake data and save incident + trigger Document 096 Auto-Draft
+    const isPI = intake.practiceAreaId === 'pa-pi' || intake.practiceAreaId === 'pa-7';
+    if (isPI && intake.matterSummary.includes('[PI_INTAKE_DATA:')) {
+      try {
+        const match = intake.matterSummary.match(/\[PI_INTAKE_DATA:\s*([\s\S]*?)\]/);
+        if (match && match[1]) {
+          const piData = JSON.parse(match[1]);
+          const { PersonalInjuryService } = await import('../personal-injury/pi.service.js');
+          await PersonalInjuryService.saveIncident(
+            matter.id,
+            {
+              incidentDate: piData.accidentDate || undefined,
+              accidentType: piData.accidentType || undefined,
+              incidentLocation: piData.accidentLocation || undefined,
+              description: piData.incidentDescription || intake.matterSummary,
+              notes: piData.additionalNotes || undefined,
+              insurancePolicy: piData.insuranceCompany
+                ? {
+                    coverageType: 'Liability',
+                    insuranceCompany: piData.insuranceCompany,
+                    insuredName: piData.insuredName || undefined,
+                    claimNumber: piData.claimNumber || undefined,
+                    policyNumber: piData.policyNumber || undefined,
+                    adjusterName: piData.adjusterName || undefined,
+                    adjusterPhone: piData.adjusterPhone || undefined,
+                    adjusterEmail: piData.adjusterEmail || undefined,
+                    status: 'Active',
+                  }
+                : undefined,
+            },
+            {
+              id: context.userId,
+              name: context.userName || 'Responsible Attorney',
+              email: 'attorney@firm.com',
+              role: context.userRole,
+            } as any,
+            {
+              ipAddress: context.ipAddress,
+              userAgent: context.userAgent,
+            }
+          );
+        }
+      } catch (err: any) {
+        console.warn('[IntakeService] Non-fatal error while triggering PI incident auto-draft on conversion:', err?.message);
+      }
+    }
 
     return { matter, intake: this.formatResponse(updatedIntake) };
   }
