@@ -24,29 +24,52 @@ export class ReconciliationService {
   }
 
   static async calculateLiveStatus(query: LiveReconciliationQuery): Promise<ReconciliationStatusResponse> {
-    // 1. Calculate sum of all active client trust sub-ledgers
+    // 1. Calculate sum of all active client trust sub-ledgers (Pillar 3)
     const subLedgers = await prisma.trustSubLedger.findMany({ select: { balance: true } });
     const clientSubledgersTotalBalance = subLedgers.reduce((sum, l) => sum + Number(l.balance), 0);
 
-    // 2. Calculate GL Trust Liability Balance (Account 1010 IOLTA or 2100 Trust Liability)
-    // Query GeneralLedgerEntry for account 1010
+    // 2. Calculate GL Trust Liability Balance from Pillar 2 control accounts (Account 2100 Client Trust Liability, or Account 1020 IOLTA Trust Bank)
+    //    We deliberately DO NOT query Operating Account 1010 to prevent commingling or operating expense contamination.
+    //    We deliberately DO NOT fall back to clientSubledgersTotalBalance when GL entries are absent.
+    //    An empty GL is a data-availability problem, not a balanced state.
     const glEntries = await prisma.generalLedgerEntry.findMany({
-      where: { accountNumber: 1010 },
-      select: { debit: true, credit: true },
+      where: { accountNumber: { in: [2100, 1020] } },
+      select: { accountNumber: true, debit: true, credit: true },
     });
-    const glTrustLiabilityBalance = glEntries.reduce((sum, e) => sum + (Number(e.debit) - Number(e.credit)), 0);
 
-    // Fall back to client subledgers if no journals posted yet to ensure baseline consistency
-    const effectiveGlBalance = glEntries.length > 0 ? glTrustLiabilityBalance : clientSubledgersTotalBalance;
+    const liabilityEntries = glEntries.filter((e) => e.accountNumber === 2100);
+    const assetEntries = glEntries.filter((e) => e.accountNumber === 1020);
+    const glDataAvailable = liabilityEntries.length > 0 || assetEntries.length > 0;
 
-    // 3. Calculate adjusted bank balance
+    // Account 2100 is Client Trust Liability (credit-normal: credit increases, debit decreases).
+    // Account 1020 is IOLTA Trust Bank Asset (debit-normal: debit increases, credit decreases).
+    let glTrustLiabilityBalance = 0;
+    if (liabilityEntries.length > 0) {
+      glTrustLiabilityBalance = Number(
+        liabilityEntries.reduce((sum, e) => sum + (Number(e.credit) - Number(e.debit)), 0).toFixed(2)
+      );
+    } else if (assetEntries.length > 0) {
+      glTrustLiabilityBalance = Number(
+        assetEntries.reduce((sum, e) => sum + (Number(e.debit) - Number(e.credit)), 0).toFixed(2)
+      );
+    }
+
+    // 3. Calculate adjusted bank balance (Pillar 1)
     const bankBalance = Number(query.bankStatementBalance || 0);
     const inTransit = Number(query.depositsInTransit || 0);
     const outstanding = Number(query.outstandingChecks || 0);
     const adjustedBankBalance = Number((bankBalance + inTransit - outstanding).toFixed(2));
 
+    // 4. Variance: Adjusted Bank vs Client Sub-Ledgers (primary three-way check)
     const reconciliationVariance = Number((adjustedBankBalance - clientSubledgersTotalBalance).toFixed(2));
-    const isBalanced = Math.abs(reconciliationVariance) < 0.01 && Math.abs(adjustedBankBalance - effectiveGlBalance) < 0.01;
+
+    // 5. isBalanced requires ALL THREE pillars to match within $0.01 tolerance.
+    //    If GL data is unavailable the reconciliation is INCOMPLETE and cannot be declared balanced,
+    //    regardless of whether the variance between Bank and Client Ledgers happens to be zero.
+    const bankMatchesClientLedger = Math.abs(reconciliationVariance) < 0.01;
+    const bankMatchesGl = glDataAvailable && Math.abs(adjustedBankBalance - glTrustLiabilityBalance) < 0.01;
+    const glMatchesClientLedger = glDataAvailable && Math.abs(glTrustLiabilityBalance - clientSubledgersTotalBalance) < 0.01;
+    const isBalanced = bankMatchesClientLedger && bankMatchesGl && glMatchesClientLedger;
 
     return {
       reconciliationMonth: query.reconciliationMonth,
@@ -54,7 +77,8 @@ export class ReconciliationService {
       depositsInTransit: Number(inTransit.toFixed(2)),
       outstandingChecks: Number(outstanding.toFixed(2)),
       adjustedBankBalance,
-      glTrustLiabilityBalance: Number(effectiveGlBalance.toFixed(2)),
+      glTrustLiabilityBalance,
+      glDataAvailable,
       clientSubledgersTotalBalance: Number(clientSubledgersTotalBalance.toFixed(2)),
       reconciliationVariance,
       isBalanced,
